@@ -32,25 +32,15 @@ import android.view.KeyEvent
 import kotlinx.coroutines.withTimeout
 import androidx.compose.runtime.mutableStateListOf
 
-//GROQ IMPORTS
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
-import android.util.Base64
+
 import java.io.ByteArrayOutputStream
+import org.tech4compassion.zoralens.BuildConfig
 
-// GROQ API
-//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
-//meta-llama/llama-4-scout-17b-16e-instruct
 
-//DEEPSEEK API: sk-728bf15c951445f0a3f78d75967865f7
-
-private val geminiMainModel = GenerativeModel(
+// Inside your MainActivity.kt file
+private val geminiMainModel = GenerativeModel (
     modelName = "gemini-3.1-flash-lite",
-    apiKey = "AIzaSyB9b9dsKCzKKb49bZekQuAnYAb9Xo8BpYo",
-
+    apiKey = BuildConfig.GEMINI_API_KEY
 )
 
 val localLogList = mutableStateListOf<String>()

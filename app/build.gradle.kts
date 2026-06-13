@@ -1,3 +1,6 @@
+import java.util.Properties         // <--- FIX 1: EXPLICIT IMPORT TO RESOLVE 'util'
+import java.io.FileInputStream      // <--- FIX 2: EXPLICIT IMPORT TO RESOLVE 'io'
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,9 +9,7 @@ plugins {
 
 android {
     namespace = "org.tech4compassion.zoralens"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "org.tech4compassion.zoralens"
@@ -18,6 +19,19 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Cleaned up properties loader utilizing the explicit script imports above
+        val props = Properties()
+        val localPropertiesFile = project.rootProject.file("local.properties")
+
+        if (localPropertiesFile.exists()) {
+            val inputStream = FileInputStream(localPropertiesFile)
+            props.load(inputStream)
+            inputStream.close()
+        }
+
+        val apiKeyStr = props.getProperty("GEMINI_API_KEY") ?: ""
+        buildConfigField("String", "GEMINI_API_KEY", "\"$apiKeyStr\"")
     }
 
     buildTypes {
@@ -30,36 +44,37 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
 dependencies {
-    // UI
+    // UI Engine
     implementation("androidx.compose.ui:ui:1.7.0")
-    // Networking
+
+    // Low-latency Processing Network Engine
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // Gemini API (Cloud version)
+
+    // Core Generative AI Models
     implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
+    // Peripheral Transmit Pipeline (Xiao Hardware Comm Link)
     implementation("com.github.mik3y:usb-serial-for-android:3.7.0")
 
     implementation("com.github.bumptech.glide:glide:4.15.1")
-
     implementation("androidx.core:core-ktx:1.12.0")
-
     implementation("androidx.appcompat:appcompat:1.6.1")
 
     implementation("com.google.mlkit:text-recognition:16.0.0")
     implementation("com.google.mlkit:language-id:17.0.6")
-
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
