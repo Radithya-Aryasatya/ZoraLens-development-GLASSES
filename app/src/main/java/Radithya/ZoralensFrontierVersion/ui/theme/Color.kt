@@ -1,4 +1,4 @@
-package org.tech4compassion.zoralens.ui.theme
+package Radithya.ZoralensFrontierVersion.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

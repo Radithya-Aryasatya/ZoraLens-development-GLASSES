@@ -1,6 +1,5 @@
-package org.tech4compassion.zoralens.ui.theme
+package Radithya.ZoralensFrontierVersion.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

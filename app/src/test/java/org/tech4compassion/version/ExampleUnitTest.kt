@@ -1,4 +1,4 @@
-package org.tech4compassion.zoralens
+package org.tech4compassion.version
 
 import org.junit.Test
 

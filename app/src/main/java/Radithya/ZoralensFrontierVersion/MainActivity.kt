@@ -1,6 +1,7 @@
-package org.tech4compassion.zoralens
+package Radithya.ZoralensFrontierVersion
 
 import android.app.PendingIntent
+import android.content.ContentValues
 import android.util.Log
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -16,25 +17,42 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import org.tech4compassion.zoralens.ui.theme.ZoraLensTheme
+import Radithya.ZoralensFrontierVersion.ui.theme.ZoraLensTheme
 import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.URL
 import java.util.*
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.content.Context
 import android.content.Intent
+import android.hardware.usb.UsbManager
+import android.os.Environment
+import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.provider.MediaStore
 import android.view.KeyEvent
 import kotlinx.coroutines.withTimeout
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
+import com.hoho.android.usbserial.driver.UsbSerialPort
+import com.hoho.android.usbserial.driver.UsbSerialProber
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 
 
 import java.io.ByteArrayOutputStream
-import org.tech4compassion.zoralens.BuildConfig
+import java.io.File
+import java.text.SimpleDateFormat
 
 
 // Inside your MainActivity.kt file
@@ -47,8 +65,7 @@ val localLogList = mutableStateListOf<String>()
 
 fun screenLog(tag: String, message: String) {
     Log.d(tag, message) // Keeps your Android Studio Logcat working
-    if (localLogList.size > 40) { localLogList.removeAt(0) } // Cap memory
-    val timeStamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
+    val timeStamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date())
     localLogList.add("[$timeStamp] [$tag] $message")
 }
 
@@ -59,11 +76,11 @@ fun deleteScreenLog () {
 class MainActivity : ComponentActivity() {
     var triggerScan: () -> Unit = {}
     private var tts: TextToSpeech? = null
-    var usbPort: com.hoho.android.usbserial.driver.UsbSerialPort? = null
+    var usbPort: UsbSerialPort? = null
 
     fun vibrateOnScan(context: Context) {
-        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
-        vibrator.vibrate(android.os.VibrationEffect.createOneShot(100, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        val vibrator = context.getSystemService(VIBRATOR_SERVICE) as Vibrator
+        vibrator.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,7 +102,14 @@ class MainActivity : ComponentActivity() {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     LensScreen(
                         modifier = Modifier.padding(innerPadding),
-                        onSpeak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null) },
+                        onSpeak = { text ->
+                            tts?.speak(
+                                text,
+                                TextToSpeech.QUEUE_FLUSH,
+                                null,
+                                null
+                            )
+                        },
                         onStopSpeak = { tts?.stop() }
                     )
                 }
@@ -116,12 +140,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun LensScreen(modifier: Modifier = Modifier, onSpeak: (String) -> Unit, onStopSpeak: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     var showLogView by remember { mutableStateOf(false) }
 
-    var activeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var activeJob by remember { mutableStateOf<Job?>(null) }
     var description by remember { mutableStateOf("Siap memindai...") }
     var isLoading by remember { mutableStateOf(false) }
     var lastScanTime by remember { mutableLongStateOf(0L) }
@@ -153,7 +177,7 @@ fun LensScreen(modifier: Modifier = Modifier, onSpeak: (String) -> Unit, onStopS
     LaunchedEffect(Unit) {
         while (true) {
             currentTime = System.currentTimeMillis()
-            kotlinx.coroutines.delay(500)
+            delay(500)
         }
     }
 
@@ -191,17 +215,70 @@ fun LensScreen(modifier: Modifier = Modifier, onSpeak: (String) -> Unit, onStopS
             Spacer(modifier = Modifier.height(20.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                color = androidx.compose.ui.graphics.Color(0xFF1E1E1E),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                color = Color(0xFF0F141C), // Deep canvas black
+                shape = RoundedCornerShape(12.dp)
             ) {
-                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(15.dp)) {
+                LazyColumn(modifier = Modifier.padding(15.dp)) {
                     items(localLogList.size) { index ->
+                        val rawLog = localLogList[index]
+
+                        // Slice the log string parts cleanly
+                        val timestampStr = rawLog.substringBefore("] ") + "]"
+                        val remainingAfterTimestamp = rawLog.substringAfter("] ")
+                        val rawTag = remainingAfterTimestamp.substringBefore("] ").replace("[", "").replace("]", "")
+                        val tagStr = "[$rawTag]"
+                        val messageStr = remainingAfterTimestamp.substringAfter("] ")
+
+                        val tagColor = when {
+                            tagStr.contains("Time") -> Color(0xFF00E676)   // Mint Green
+                            tagStr.contains("Serial") -> Color(0xFFBA68C8) // Purple
+                            tagStr.contains("Click") -> Color(0xFF29B6F6)  // Blue
+                            tagStr.contains("Error") || tagStr.contains("Exception") -> Color(0xFFFF5252) // Red
+                            else -> Color(0xFFFFB300)                      // Amber
+                        }
+
+                        val isTimingData = tagStr.contains("Time") && messageStr.contains("ms")
+
+                        val liveTerminalString = buildAnnotatedString {
+                            withStyle(style = SpanStyle(color = Color(0x7AFFFFFF))) {
+                                append("$timestampStr ")
+                            }
+                            withStyle(style = SpanStyle(color = tagColor, fontWeight = FontWeight.Bold)) {
+                                append("$tagStr ")
+                            }
+
+                            if (isTimingData) {
+                                val msPattern = "(\\d+)\\s*ms".toRegex()
+                                val matchResult = msPattern.find(messageStr)
+                                val extractedMs = matchResult?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+
+                                val titlePart = if (messageStr.contains(":")) messageStr.substringBefore(":") + ":" else "Metric:"
+                                val valuePart = messageStr.substringAfter(":")
+
+                                val heatColor = when {
+                                    extractedMs < 200L -> Color(0xFF64FFDA)   // Fast (Cyan)
+                                    extractedMs < 1000L -> Color(0xFFFFEE58)  // Medium (Yellow)
+                                    else -> Color(0xFFFF5252)                 // Bottleneck (Red)
+                                }
+
+                                withStyle(style = SpanStyle(color = heatColor, fontWeight = FontWeight.Medium)) {
+                                    append("$titlePart ")
+                                }
+                                withStyle(style = SpanStyle(color = Color.White, fontWeight = FontWeight.Bold)) {
+                                    append(valuePart)
+                                }
+                            } else {
+                                withStyle(style = SpanStyle(color = Color(0xFFECEFF1))) {
+                                    append(messageStr)
+                                }
+                            }
+                        }
+
                         Text(
-                            text = localLogList[index],
+                            text = liveTerminalString,
                             style = MaterialTheme.typography.bodySmall,
-                            color = androidx.compose.ui.graphics.Color(0xFF00FF00),
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth()
                         )
                     }
                 }
@@ -297,40 +374,18 @@ suspend fun fetchAndDescribe(context: Context): String {
                 rawDownloaded.recycle()
                 screenLog("ZoraTime", "2. Image Proc: ${System.currentTimeMillis() - procStart}ms | Size: ${imgSizeKb}KB")
 
-                // 3. ESSENTIAL PROMPT (RESTORED)
-                // 3. ESSENTIAL PROMPT
-                Log.d("ZoraLens", "Using Model: ${geminiMainModel.modelName}")
-
-                val prompt = """
-                ACT AS: Expert blind guide.
-                CONTEXT: The user wears a sensor camera on glasses.
-                TASK: Briefly and clearly describe the most important thing in front of the user.
-                FORMAT: Describe what the user sees. Maximum 60 words. In English
-                NOTES: Ignore the blurry camera quality.
-                """.trimIndent()
-
-                val aiStart = System.currentTimeMillis()
-
-                // The system PAUSES here until the cloud responds
-                val response = geminiMainModel.generateContent(content {
-                    image(finalBmp)
-                    text(prompt)
-                })
-
-                // The system RESUMES here
-                val aiEnd = System.currentTimeMillis()
-                val pureInferenceTime = aiEnd - aiStart
-                val result = response.text ?: "Gagal: AI tidak memberikan respon."
-
-                // CRITICAL TIMING LOG
-                screenLog("ZoraTime", "3. Gemini Roundtrip (${geminiMainModel.modelName}): ${pureInferenceTime}ms")
-                // 5. FINAL CLEANUP
+                //  PASTE THIS INSTEAD:
+                // Free raw bitmap memory safely right after compression
+                rawDownloaded.recycle()
                 finalBmp.recycle()
 
-                screenLog("ZoraTime", "TOTAL ROUNDTRIP: ${System.currentTimeMillis() - overallStart}ms")
-                result // This is the final string returned
+                val totalDuration = System.currentTimeMillis() - overallStart
+                screenLog("ZoraTime", "Local Capture Processing Complete: ${totalDuration}ms")
+
+                // This local success notification text gets passed up to the Text-to-Speech audio engine
+                "Image captured and saved locally."
             }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+        } catch (e: TimeoutCancellationException) {
         "Gagal: Waktu habis. Koneksi internet mungkin lambat."
     } catch (e: Exception) {
         val errorMsg = e.localizedMessage ?: ""
@@ -356,12 +411,12 @@ fun captureFrameFromUsb(context: Context): Bitmap? {
         val vacuumBucket = ByteArray(2048)
         var limit = 0
         while (port.read(vacuumBucket, 5) > 0 && limit < 5) { limit++ }
-        android.os.SystemClock.sleep(50)
+        SystemClock.sleep(50)
 
         // Fire request trigger
         port.write("S".toByteArray(), 100)
 
-        val outStream = java.io.ByteArrayOutputStream()
+        val outStream = ByteArrayOutputStream()
         val tempBuffer = ByteArray(8192)
         var totalRead = 0
         val startTime = System.currentTimeMillis()
@@ -376,7 +431,7 @@ fun captureFrameFromUsb(context: Context): Bitmap? {
                 totalRead += len
                 lastDataTime = System.currentTimeMillis()
             } else {
-                android.os.SystemClock.sleep(10)
+                SystemClock.sleep(10)
                 // Fail fast: If zero bytes arrive within 1.5 seconds, drop out immediately
                 if (totalRead == 0 && (System.currentTimeMillis() - startTime > 1500)) break
                 if (totalRead > 5000 && (System.currentTimeMillis() - lastDataTime > 400)) break
@@ -418,18 +473,18 @@ fun captureFrameFromUsb(context: Context): Bitmap? {
 }
 
 private fun saveToGallery(context: Context, jpegBytes: ByteArray) {
-    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
     val name = "Zora_${timestamp}.jpg"
 
-    val contentValues = android.content.ContentValues().apply {
-        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
-        put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-        put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/ZoraLens")
-        put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1) // Hide while writing
+    val contentValues = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/ZoraLens")
+        put(MediaStore.MediaColumns.IS_PENDING, 1) // Hide while writing
     }
 
     val resolver = context.contentResolver
-    val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
 
     uri?.let { targetUri ->
         try {
@@ -437,7 +492,7 @@ private fun saveToGallery(context: Context, jpegBytes: ByteArray) {
 
             // PUBLISH: Now reveal it to the gallery
             contentValues.clear()
-            contentValues.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(targetUri, contentValues, null, null)
 
             Log.d("ZoraSave", "SUCCESS: Image published to Gallery: $name")
@@ -447,14 +502,14 @@ private fun saveToGallery(context: Context, jpegBytes: ByteArray) {
     }
 }
 
-fun ensureUsbConnected(context: Context): com.hoho.android.usbserial.driver.UsbSerialPort? {
+fun ensureUsbConnected(context: Context): UsbSerialPort? {
     val activity = context as? MainActivity ?: return null
 
     // If already open, just return it
     if (activity.usbPort?.isOpen == true) return activity.usbPort
 
-    val manager = context.getSystemService(Context.USB_SERVICE) as android.hardware.usb.UsbManager
-    val availableDrivers = com.hoho.android.usbserial.driver.UsbSerialProber.getDefaultProber().findAllDrivers(manager)
+    val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+    val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager)
     if (availableDrivers.isEmpty()) return null
 
     val driver = availableDrivers[0]
@@ -475,8 +530,8 @@ fun ensureUsbConnected(context: Context): com.hoho.android.usbserial.driver.UsbS
         port.setParameters(
             921600,
             8,
-            com.hoho.android.usbserial.driver.UsbSerialPort.STOPBITS_1,
-            com.hoho.android.usbserial.driver.UsbSerialPort.PARITY_NONE
+            UsbSerialPort.STOPBITS_1,
+            UsbSerialPort.PARITY_NONE
         )
         port.dtr = true
         port.rts = true
@@ -492,20 +547,20 @@ fun ensureUsbConnected(context: Context): com.hoho.android.usbserial.driver.UsbS
 fun downloadLogsToDocuments(context: Context) {
     if (localLogList.isEmpty()) return
 
-    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
     val filename = "ZoraLog_${timestamp}.txt"
 
     try {
         // Point directly to the standard public Download root directory
-        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-        val zoraFolder = java.io.File(downloadsDir, "ZoraLens")
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val zoraFolder = File(downloadsDir, "ZoraLens")
 
         // Ensure the ZoraLens folder exists inside the Download directory
         if (!zoraFolder.exists()) {
             zoraFolder.mkdirs()
         }
 
-        val logFile = java.io.File(zoraFolder, filename)
+        val logFile = File(zoraFolder, filename)
 
         // Write the local terminal text array to disk
         logFile.printWriter().use { writer ->
@@ -519,7 +574,8 @@ fun downloadLogsToDocuments(context: Context) {
         Log.e("ZoraLogExport", "FAILED to write log file: ${e.message}")
         screenLog("ZoraLogExport", "ERROR: Could not write file.")
     }
-} // end
+}
+// end
 
 
 

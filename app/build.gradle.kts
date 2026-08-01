@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "org.tech4compassion.zoralens"
+    namespace = "Radithya.ZoralensFrontierVersion"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "org.tech4compassion.zoralens"
+        applicationId = "Radithya.ZoralensFrontierVersion"
         minSdk = 30
         targetSdk = 36
         versionCode = 1

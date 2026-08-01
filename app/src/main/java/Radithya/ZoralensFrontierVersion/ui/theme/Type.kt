@@ -1,4 +1,4 @@
-package org.tech4compassion.zoralens.ui.theme
+package Radithya.ZoralensFrontierVersion.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

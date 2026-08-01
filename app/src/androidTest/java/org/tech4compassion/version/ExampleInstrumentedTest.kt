@@ -1,4 +1,4 @@
-package org.tech4compassion.zoralens
+package org.tech4compassion.version
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
