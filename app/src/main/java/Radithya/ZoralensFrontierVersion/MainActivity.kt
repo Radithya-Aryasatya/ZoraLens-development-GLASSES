@@ -49,6 +49,9 @@ import com.hoho.android.usbserial.driver.UsbSerialProber
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.unit.sp
 
 
 import java.io.ByteArrayOutputStream
@@ -58,7 +61,7 @@ import java.text.SimpleDateFormat
 
 // Inside your MainActivity.kt file
 private val geminiMainModel = GenerativeModel (
-    modelName = "gemini-3.1-flash-lite",
+    modelName = "gemini-3.5-flash-lite",
     apiKey = BuildConfig.GEMINI_API_KEY
 )
 
@@ -72,6 +75,54 @@ fun screenLog(tag: String, message: String) {
 
 fun deleteScreenLog () {
     localLogList.removeAll(localLogList)
+}
+
+// --- EXCEPTION VIEWER DATA LAYER ---
+// Stores the REAL error details (type, message, stack trace) so the phone
+// screen can show exactly what broke, instead of only the short vague
+// sentence that gets spoken by TTS.
+data class ErrorRecord(
+    val timestamp: String,
+    val tag: String,
+    val exceptionName: String,
+    val message: String,
+    val stackTrace: String
+)
+
+val localErrorList = mutableStateListOf<ErrorRecord>()
+
+fun logException(tag: String, e: Throwable) {
+    val timeStamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date())
+
+    val stringWriter = java.io.StringWriter()
+    e.printStackTrace(java.io.PrintWriter(stringWriter))
+    val fullTrace = stringWriter.toString().let {
+        if (it.length > 6000) it.substring(0, 6000) + "\n... (trace truncated)" else it
+    }
+
+    val rawName = e.javaClass.simpleName
+    localErrorList.add(
+        ErrorRecord(
+            timestamp = timeStamp,
+            tag = tag,
+            exceptionName = if (rawName.isNullOrEmpty()) "UnknownException" else rawName,
+            message = e.message ?: "(no message provided)",
+            stackTrace = fullTrace
+        )
+    )
+
+    // Keep memory bounded: never hold more than the last 100 exceptions
+    if (localErrorList.size > 100) {
+        localErrorList.removeAt(0)
+    }
+
+    Log.e(tag, "Exception captured: ${e.javaClass.name}: ${e.message}")
+    // Also drop a colored one-liner into the main terminal feed
+    screenLog(tag, "EXCEPTION: ${if (rawName.isNullOrEmpty()) "UnknownException" else rawName}: ${e.message ?: "(no message)"}")
+}
+
+fun deleteErrorLog () {
+    localErrorList.removeAll(localErrorList)
 }
 
 class MainActivity : ComponentActivity() {
@@ -145,6 +196,8 @@ fun LensScreen(modifier: Modifier = Modifier, onSpeak: (String) -> Unit, onStopS
     val coroutineScope = rememberCoroutineScope()
 
     var showLogView by remember { mutableStateOf(false) }
+    var logTab by remember { mutableStateOf(0) } // 0 = ALL LOGS, 1 = EXCEPTION VIEWER
+    val expandedErrors = remember { mutableStateMapOf<String, Boolean>() }
 
     var activeJob by remember { mutableStateOf<Job?>(null) }
     var description by remember { mutableStateOf("Siap memindai...") }
@@ -196,9 +249,36 @@ fun LensScreen(modifier: Modifier = Modifier, onSpeak: (String) -> Unit, onStopS
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(text = "System Monitor", style = MaterialTheme.typography.headlineMedium)
-
-
+                if (localErrorList.isNotEmpty()) {
+                    Text(
+                        text = "⚠ ${localErrorList.size}",
+                        color = Color(0xFFFF5252),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
             }
+
+            // TAB SWITCHER: ALL LOGS vs EXCEPTION VIEWER
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { logTab = 0 },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (logTab == 0) MaterialTheme.colorScheme.primary else Color(0xFF37474F)
+                    )
+                ) {
+                    Text("ALL LOGS")
+                }
+                Button(
+                    onClick = { logTab = 1 },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (logTab == 1) Color(0xFFC62828) else Color(0xFF37474F)
+                    )
+                ) {
+                    Text("ERRORS (${localErrorList.size})")
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            if (logTab == 0) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { downloadLogsToDocuments(context) },
@@ -284,6 +364,80 @@ fun LensScreen(modifier: Modifier = Modifier, onSpeak: (String) -> Unit, onStopS
                     }
                 }
             }
+            } else {
+                // --- EXCEPTION VIEWER TAB ---
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { exportErrorsToDocuments(context) },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                    ) { Text("EXPORT") }
+                    Button(onClick = { showLogView = false }) { Text("BACK") }
+                    Button(onClick = { deleteErrorLog() }) { Text("CLEAR") }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    color = Color(0xFF160D12), // Deep canvas red-black
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (localErrorList.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().padding(15.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No exceptions captured.\nAll systems healthy.",
+                                color = Color(0xFF64FFDA),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    } else {
+                        LazyColumn(modifier = Modifier.padding(12.dp)) {
+                            items(localErrorList.size) { idx ->
+                                // Newest error first
+                                val rec = localErrorList[localErrorList.size - 1 - idx]
+                                val errorKey = "${rec.timestamp}|${rec.exceptionName}|${rec.message}"
+                                val isOpen = expandedErrors[errorKey] == true
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clickable { expandedErrors[errorKey] = !isOpen },
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1114)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = "${rec.timestamp}  [${rec.tag}]",
+                                            color = Color(0x7AFFFFFF),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                        Text(
+                                            text = rec.exceptionName,
+                                            color = Color(0xFFFF5252),
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.titleSmall
+                                        )
+                                        Text(
+                                            text = rec.message,
+                                            color = Color(0xFFFFCDD2),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = if (isOpen) rec.stackTrace else "TAP FOR FULL STACK TRACE",
+                                            color = if (isOpen) Color(0xFFB0BEC5) else Color(0xFF90A4AE),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     } else {
         Column(
@@ -331,6 +485,21 @@ fun LensScreen(modifier: Modifier = Modifier, onSpeak: (String) -> Unit, onStopS
                 modifier = Modifier.fillMaxWidth().height(60.dp)
             ) {
                 Text("VIEW SYSTEM LOGS")
+            }
+
+            // Red badge: jumps straight into the Exception Viewer when errors exist
+            if (localErrorList.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        logTab = 1
+                        showLogView = true
+                    },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C))
+                ) {
+                    Text("⚠ ${localErrorList.size} ERROR(S) — TAP TO VIEW")
+                }
             }
         }
     }
@@ -404,9 +573,11 @@ suspend fun fetchAndDescribe(context: Context): String {
                 response.text ?: "AI did not return a description."
             }
         } catch (e: TimeoutCancellationException) {
+        logException("ZoraAI", e)
         "Gagal: Waktu habis. Koneksi internet mungkin lambat."
     } catch (e: Exception) {
         val errorMsg = e.localizedMessage ?: ""
+        logException("ZoraSystem", e)
         Log.e("ZoraError", "Full Error Stack: $errorMsg")
 
         when {
@@ -419,7 +590,11 @@ suspend fun fetchAndDescribe(context: Context): String {
             errorMsg.contains("429") || errorMsg.contains("quota") -> "AI usage limit reached. Please wait."
             errorMsg.contains("Unable to resolve host") -> "Failed: No internet connection."
             errorMsg.contains("User location is not supported") -> "AI service is not available in this region."
-            else -> "System error: ${e.javaClass.simpleName}. Try again."
+            else -> {
+                val detail = (e.message ?: "").trim()
+                if (detail.isEmpty()) "System error: ${e.javaClass.simpleName}. Try again."
+                else "System error: ${e.javaClass.simpleName}: ${detail.take(80)}. Try again."
+            }
         }
     }
     }
@@ -490,6 +665,7 @@ fun captureFrameFromUsb(context: Context): Bitmap? {
             }
         }
     } catch (e: Exception) {
+        logException("ZoraCapture", e)
         screenLog("ZoraCaptureException", "${e.message}")
         throw e // Pass up to the fetchAndDescribe tracking block
     }
@@ -520,6 +696,7 @@ private fun saveToGallery(context: Context, jpegBytes: ByteArray) {
 
             Log.d("ZoraSave", "SUCCESS: Image published to Gallery: $name")
         } catch (e: Exception) {
+            logException("ZoraSave", e)
             Log.e("ZoraSave", "FAILED: ${e.message}")
         }
     }
@@ -563,6 +740,7 @@ fun ensureUsbConnected(context: Context): UsbSerialPort? {
         Thread.sleep(2000)
         return port
     } catch (e: Exception) {
+        logException("ZoraUsb", e)
         return null
     }
 }
@@ -594,8 +772,49 @@ fun downloadLogsToDocuments(context: Context) {
 
         screenLog("ZoraLogExport", "SUCCESS: File saved to Download/ZoraLens/$filename")
     } catch (e: Exception) {
+        logException("ZoraLogExport", e)
         Log.e("ZoraLogExport", "FAILED to write log file: ${e.message}")
         screenLog("ZoraLogExport", "ERROR: Could not write file.")
+    }
+}
+
+// Exports ONLY the real exception records (with full stack traces) so the
+// actual cause of failures can be inspected after the fact.
+fun exportErrorsToDocuments(context: Context) {
+    if (localErrorList.isEmpty()) {
+        screenLog("ZoraErrorExport", "Nothing to export: zero exception records.")
+        return
+    }
+
+    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+    val filename = "ZoraErrors_${timestamp}.txt"
+
+    try {
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val zoraFolder = File(downloadsDir, "ZoraLens")
+        if (!zoraFolder.exists()) {
+            zoraFolder.mkdirs()
+        }
+
+        val errFile = File(zoraFolder, filename)
+        errFile.printWriter().use { writer ->
+            writer.println("ZoraLens EXCEPTION REPORT - ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}")
+            writer.println("Total exception records: ${localErrorList.size}")
+            writer.println("=================================================")
+            localErrorList.forEach { rec ->
+                writer.println()
+                writer.println("[${rec.timestamp}] [${rec.tag}] ${rec.exceptionName}")
+                writer.println("Message    : ${rec.message}")
+                writer.println("Stacktrace :")
+                writer.println(rec.stackTrace)
+                writer.println("-------------------------------------------------")
+            }
+        }
+        screenLog("ZoraErrorExport", "SUCCESS: File saved to Download/ZoraLens/$filename")
+    } catch (e: Exception) {
+        logException("ZoraErrorExport", e)
+        Log.e("ZoraErrorExport", "FAILED to write error file: ${e.message}")
+        screenLog("ZoraErrorExport", "ERROR: Could not write file.")
     }
 }
 // end
