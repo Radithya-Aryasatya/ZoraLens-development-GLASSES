@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import Radithya.ZoralensFrontierVersion.ui.theme.ZoraLensTheme
 import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -371,19 +372,36 @@ suspend fun fetchAndDescribe(context: Context): String {
                     saveToGallery(context, jpegBytes)
                 }
 
-                rawDownloaded.recycle()
                 screenLog("ZoraTime", "2. Image Proc: ${System.currentTimeMillis() - procStart}ms | Size: ${imgSizeKb}KB")
 
-                //  PASTE THIS INSTEAD:
-                // Free raw bitmap memory safely right after compression
-                rawDownloaded.recycle()
+                // 3. GEMINI ROUNDTRIP (cloud LVLM)
+                Log.d("ZoraLens", "Using Model: ${geminiMainModel.modelName}")
+
+                val prompt = """
+                ACT AS: Expert blind guide.
+                CONTEXT: The user wears a sensor camera on glasses.
+                TASK: Briefly and clearly describe the most important thing in front of the user.
+                FORMAT: Describe what the user sees. Maximum 60 words. In English
+                NOTES: Ignore the blurry camera quality.
+                """.trimIndent()
+
+                val aiStart = System.currentTimeMillis()
+
+                // The system PAUSES here until the cloud responds
+                val response = geminiMainModel.generateContent(content {
+                    image(finalBmp)
+                    text(prompt)
+                })
+
+                screenLog("ZoraTime", "3. Gemini Roundtrip (${geminiMainModel.modelName}): ${System.currentTimeMillis() - aiStart}ms")
+
+                // 4. FINAL CLEANUP (bitmap no longer needed after the request)
                 finalBmp.recycle()
 
-                val totalDuration = System.currentTimeMillis() - overallStart
-                screenLog("ZoraTime", "Local Capture Processing Complete: ${totalDuration}ms")
+                screenLog("ZoraTime", "TOTAL ROUNDTRIP: ${System.currentTimeMillis() - overallStart}ms")
 
-                // This local success notification text gets passed up to the Text-to-Speech audio engine
-                "Image captured and saved locally."
+                // This AI description gets passed up to the Text-to-Speech audio engine
+                response.text ?: "AI did not return a description."
             }
         } catch (e: TimeoutCancellationException) {
         "Gagal: Waktu habis. Koneksi internet mungkin lambat."
@@ -394,8 +412,13 @@ suspend fun fetchAndDescribe(context: Context): String {
         when {
             errorMsg.contains("Hardware Error:") -> errorMsg
             errorMsg.contains("Camera Error:") -> errorMsg
-            errorMsg.contains("429") -> "AI usage limit reached. Please wait."
+            errorMsg.contains("403") || errorMsg.contains("leaked") ->
+                "API key revoked: The Gemini key was leaked or disabled. Put a NEW key in local.properties and rebuild."
+            errorMsg.contains("API key not valid") || errorMsg.contains("PERMISSION_DENIED") ->
+                "API key error: The Gemini key is invalid. Check GEMINI_API_KEY in local.properties."
+            errorMsg.contains("429") || errorMsg.contains("quota") -> "AI usage limit reached. Please wait."
             errorMsg.contains("Unable to resolve host") -> "Failed: No internet connection."
+            errorMsg.contains("User location is not supported") -> "AI service is not available in this region."
             else -> "System error: ${e.javaClass.simpleName}. Try again."
         }
     }
