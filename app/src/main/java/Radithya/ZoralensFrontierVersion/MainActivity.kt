@@ -577,6 +577,8 @@ fun downloadLogsToDocuments(context: Context) {
 }
 // end
 
+// System works by XIAO ESP32S3 Sense -> (USB C transport) Android Companion App -> Cloud LVLM Round trip back and forth -> Android Companion App -> Audio output speech to user
+
 
 
 
